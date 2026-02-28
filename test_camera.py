@@ -5,14 +5,6 @@
 """
 
 import sys
-import os
-
-# 添加依赖包路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'deps', 'Lib', 'site-packages'))
-import site
-user_site = site.getusersitepackages()
-if user_site and os.path.exists(user_site):
-    sys.path.insert(0, user_site)
 
 import cv2
 import numpy as np

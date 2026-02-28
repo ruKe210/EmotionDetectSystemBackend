@@ -9,8 +9,6 @@ import numpy as np
 from typing import Dict, List, Set
 from fastapi import WebSocket, WebSocketDisconnect
 from datetime import datetime
-import threading
-import time
 
 from app.services.inference_engine import inference_engine, InferenceFrame
 from app.services.data_store import data_store
@@ -104,20 +102,13 @@ class WebSocketManager:
             self.video_frames[inference_frame.camera_id] = inference_frame.frame_base64
     
     def start_broadcast_loop(self):
-        """启动广播循环"""
+        """启动广播循环（在主事件循环中创建任务）"""
         if self.is_running:
             return
         self.is_running = True
-        
-        # 在新线程中运行广播循环
-        def run_loop():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._broadcast_loop())
-        
-        thread = threading.Thread(target=run_loop)
-        thread.daemon = True
-        thread.start()
+
+        loop = asyncio.get_event_loop()
+        self.broadcast_task = loop.create_task(self._broadcast_loop())
     
     async def _broadcast_loop(self):
         """广播循环 - 定期发送数据"""
@@ -166,6 +157,9 @@ class WebSocketManager:
     def stop(self):
         """停止广播循环"""
         self.is_running = False
+        if self.broadcast_task:
+            self.broadcast_task.cancel()
+            self.broadcast_task = None
         # 注销回调
         inference_engine.unregister_callback(self._on_inference_result)
         inference_engine.unregister_frame_callback(self._on_frame_ready)

@@ -6,17 +6,6 @@
 """
 
 import sys
-import os
-
-# 添加依赖包路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'deps', 'Lib', 'site-packages'))
-
-# 添加用户 site-packages 路径（用于 onnxruntime 等用户安装的包）
-import site
-user_site = site.getusersitepackages()
-if user_site and os.path.exists(user_site):
-    sys.path.insert(0, user_site)
-
 import subprocess
 import argparse
 
