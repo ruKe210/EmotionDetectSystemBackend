@@ -41,7 +41,18 @@ class Settings(BaseSettings):
     EMOTION_MODEL_PATH: str = "models/emotion_model.pth"
     DISCRETE_EMOTIONS: List[str] = ["happy", "sad", "angry", "fear", "surprise", "neutral"]
     
-    # 数据存储配置（模拟）
+    # 数据库配置
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 3306
+    DB_USER: str = "root"
+    DB_PASSWORD: str = "su15906477192"
+    DB_NAME: str = "emotion_detect"
+
+    @property
+    def DATABASE_URL(self) -> str:
+        return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
+
+    # 数据存储配置
     DATA_STORAGE_PATH: str = "data/storage"
     LOG_PATH: str = "data/logs"
     
