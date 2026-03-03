@@ -81,3 +81,6 @@ app/services/__pycache__/yolo_face_detector.cpython-39.pyc
 app/websocket/__pycache__/__init__.cpython-39.pyc
 app/websocket/__pycache__/manager.cpython-39.pyc
 app/websocket/__pycache__/routes.cpython-39.pyc
+app/__pycache__
+app/core/__pycache__
+app/models/__pycache__

@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     DB_USER: str = "root"
     DB_PASSWORD: str = "su15906477192"
     DB_NAME: str = "emotion_detect"
+    
+    # 数据库连接池配置
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_RECYCLE: int = 3600
+    DB_POOL_PRE_PING: bool = True
+    
+    # 批量写入配置
+    BATCH_WRITE_SIZE: int = 50  # 每批次写入50条
+    BATCH_WRITE_INTERVAL: float = 2.0  # 每2秒写入一次
+    FACE_QUEUE_SIZE: int = 1000  # 队列最大容量
 
     @property
     def DATABASE_URL(self) -> str:

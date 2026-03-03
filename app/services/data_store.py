@@ -2,6 +2,9 @@ import json
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+import threading
+import queue
+import time
 
 from sqlalchemy import desc, func
 from app.core.database import get_db_session
@@ -15,6 +18,7 @@ class DatabaseDataStore:
     """
     数据库数据存储 - 使用 MySQL + SQLAlchemy
     保持与原 MockDataStore 相同的接口
+    优化：使用批量写入队列，减少数据库操作频率
     """
 
     _instance = None
@@ -22,7 +26,102 @@ class DatabaseDataStore:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        
+        # 批量写入队列
+        self._face_queue = queue.Queue(maxsize=1000)
+        self._batch_size = 50  # 每批次写入50条
+        self._batch_interval = 2.0  # 每2秒写入一次
+        self._writer_thread = None
+        self._writer_running = False
+        
+        # 启动批量写入线程
+        self._start_batch_writer()
+
+    def _start_batch_writer(self):
+        """启动批量写入线程"""
+        if self._writer_running:
+            return
+        
+        self._writer_running = True
+        self._writer_thread = threading.Thread(target=self._batch_write_loop, daemon=True)
+        self._writer_thread.start()
+        print("[数据存储] 批量写入线程已启动")
+
+    def _batch_write_loop(self):
+        """批量写入循环"""
+        batch = []
+        last_write_time = time.time()
+        
+        while self._writer_running:
+            try:
+                # 尝试从队列获取数据（非阻塞）
+                try:
+                    item = self._face_queue.get(timeout=0.1)
+                    batch.append(item)
+                except queue.Empty:
+                    pass
+                
+                current_time = time.time()
+                should_write = (
+                    len(batch) >= self._batch_size or 
+                    (len(batch) > 0 and current_time - last_write_time >= self._batch_interval)
+                )
+                
+                if should_write:
+                    self._write_batch(batch)
+                    batch.clear()
+                    last_write_time = current_time
+                    
+            except Exception as e:
+                print(f"[数据存储] 批量写入错误: {e}")
+                batch.clear()
+
+    def _write_batch(self, batch: List[Dict]):
+        """批量写入数据库"""
+        if not batch:
+            return
+        
+        session = get_db_session()
+        try:
+            face_records = []
+            for face_data in batch:
+                expressions = face_data.get("expressions", {})
+                if isinstance(expressions, dict):
+                    expressions_json = expressions
+                else:
+                    expressions_json = {}
+
+                face_record = FaceHistory(
+                    id=face_data.get("id", str(uuid.uuid4())[:8]),
+                    camera_id=face_data.get("camera_id"),
+                    expressions=expressions_json,
+                    dominant_emotion=face_data.get("dominant_emotion"),
+                    confidence=face_data.get("confidence"),
+                    timestamp=face_data.get("timestamp", datetime.now()),
+                    valence=face_data.get("valence", 0),
+                    arousal=face_data.get("arousal", 0),
+                    pleasure=face_data.get("pleasure", 0),
+                    pad_arousal=face_data.get("pad_arousal", 0),
+                    dominance=face_data.get("dominance", 0),
+                )
+                face_records.append(face_record)
+            
+            # 批量插入
+            session.bulk_save_objects(face_records)
+            session.commit()
+            # print(f"[数据存储] 批量写入 {len(face_records)} 条人脸记录")
+        except Exception as e:
+            session.rollback()
+            print(f"[数据存储] 批量写入失败: {e}")
+        finally:
+            session.close()
 
     # ========== 用户相关 ==========
     def get_user(self, username: str) -> Optional[Dict]:
@@ -183,33 +282,12 @@ class DatabaseDataStore:
 
     # ========== 人脸历史相关 ==========
     def add_face_detection(self, detection_data: Dict):
-        session = get_db_session()
+        """添加人脸检测记录到队列（异步批量写入）"""
         try:
-            expressions = detection_data.get("expressions", {})
-            if isinstance(expressions, dict):
-                expressions_json = expressions
-            else:
-                expressions_json = {}
-
-            face = FaceHistory(
-                id=detection_data.get("id", str(uuid.uuid4())[:8]),
-                camera_id=detection_data.get("camera_id"),
-                expressions=expressions_json,
-                dominant_emotion=detection_data.get("dominant_emotion"),
-                confidence=detection_data.get("confidence"),
-                timestamp=detection_data.get("timestamp", datetime.now()),
-                valence=detection_data.get("valence", 0),
-                arousal=detection_data.get("arousal", 0),
-                pleasure=detection_data.get("pleasure", 0),
-                pad_arousal=detection_data.get("pad_arousal", 0),
-                dominance=detection_data.get("dominance", 0),
-            )
-            session.add(face)
-            session.commit()
-        except Exception:
-            session.rollback()
-        finally:
-            session.close()
+            self._face_queue.put_nowait(detection_data)
+        except queue.Full:
+            # 队列满时，丢弃旧数据
+            print("[数据存储] 队列已满，丢弃人脸记录")
 
     def get_face_history(self, start_date: Optional[datetime] = None,
                          end_date: Optional[datetime] = None,
@@ -263,9 +341,13 @@ class DatabaseDataStore:
             session.close()
 
     def save_inference_result(self, inference_frame):
-        """保存推理结果 (含离散+2D+3D情绪数据)"""
+        """保存推理结果 (含离散+2D+3D情绪数据) - 使用队列异步批量写入"""
+        if not inference_frame.faces:
+            return
+        
+        # 将所有人脸数据加入队列
         for face in inference_frame.faces:
-            self.add_face_detection({
+            face_data = {
                 "id": face.face_id,
                 "camera_id": face.camera_id,
                 "expressions": face.expressions,
@@ -277,7 +359,8 @@ class DatabaseDataStore:
                 "pleasure": getattr(face, 'pleasure', 0.0),
                 "pad_arousal": getattr(face, 'pad_arousal', 0.0),
                 "dominance": getattr(face, 'dominance', 0.0),
-            })
+            }
+            self.add_face_detection(face_data)
 
     # ========== 告警相关 ==========
     def get_alerts(self, status: Optional[str] = None,
