@@ -6,6 +6,7 @@ import json
 import base64
 import cv2
 import numpy as np
+import time
 from typing import Dict, List, Set
 from fastapi import WebSocket, WebSocketDisconnect
 from datetime import datetime
@@ -36,6 +37,11 @@ class WebSocketManager:
         self.latest_face_data = {}
         self.latest_stats = {}
         self.video_frames = {}  # camera_id -> frame_base64
+        
+        # 情绪分布缓存（避免在 async 循环中阻塞查询 DB）
+        self._emotion_dist_cache = {}
+        self._emotion_dist_last_update = 0
+        self._emotion_dist_interval = 5.0  # 每 5 秒更新一次
         
     async def connect(self, websocket: WebSocket, channel: str):
         """建立WebSocket连接"""
@@ -107,11 +113,14 @@ class WebSocketManager:
             return
         self.is_running = True
 
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
         self.broadcast_task = loop.create_task(self._broadcast_loop())
     
     async def _broadcast_loop(self):
-        """广播循环 - 定期发送数据"""
+        """广播循环 - 定期发送数据（不阻塞事件循环）"""
         while self.is_running:
             try:
                 # 发送实时人脸数据
@@ -124,16 +133,24 @@ class WebSocketManager:
                         }
                         await self.broadcast(message, "face")
                 
-                # 发送统计数据
+                # 发送统计数据（情绪分布用缓存，不阻塞）
                 if self.active_connections["stats"] and self.latest_stats:
-                    # 添加情绪分布统计
-                    emotion_dist = data_store.get_emotion_distribution(minutes=5)
+                    now = time.time()
+                    if now - self._emotion_dist_last_update >= self._emotion_dist_interval:
+                        try:
+                            self._emotion_dist_cache = await asyncio.to_thread(
+                                data_store.get_emotion_distribution, 5
+                            )
+                            self._emotion_dist_last_update = now
+                        except Exception as e:
+                            print(f"[WS] 获取情绪分布失败: {e}")
+
                     stats_message = {
                         "type": "stats",
                         "timestamp": datetime.now().isoformat(),
                         "data": {
                             **self.latest_stats,
-                            "emotion_distribution": emotion_dist
+                            "emotion_distribution": self._emotion_dist_cache
                         }
                     }
                     await self.broadcast(stats_message, "stats")
@@ -150,6 +167,8 @@ class WebSocketManager:
                         await self.broadcast(message, "video")
                 
                 await asyncio.sleep(0.05)  # 每50ms发送一次 (20 FPS)
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 print(f"广播循环错误: {e}")
                 await asyncio.sleep(0.5)

@@ -55,15 +55,15 @@ class DatabaseDataStore:
         print("[数据存储] 批量写入线程已启动")
 
     def _batch_write_loop(self):
-        """批量写入循环"""
+        """批量写入循环 — 独立线程，不影响推理"""
         batch = []
         last_write_time = time.time()
         
         while self._writer_running:
             try:
-                # 尝试从队列获取数据（非阻塞）
+                # 非阻塞取数据
                 try:
-                    item = self._face_queue.get(timeout=0.1)
+                    item = self._face_queue.get(timeout=0.2)
                     batch.append(item)
                 except queue.Empty:
                     pass
@@ -84,7 +84,7 @@ class DatabaseDataStore:
                 batch.clear()
 
     def _write_batch(self, batch: List[Dict]):
-        """批量写入数据库"""
+        """批量写入数据库 — 每次用新 session，失败不影响后续"""
         if not batch:
             return
         
@@ -93,15 +93,13 @@ class DatabaseDataStore:
             face_records = []
             for face_data in batch:
                 expressions = face_data.get("expressions", {})
-                if isinstance(expressions, dict):
-                    expressions_json = expressions
-                else:
-                    expressions_json = {}
+                if not isinstance(expressions, dict):
+                    expressions = {}
 
-                face_record = FaceHistory(
+                face_records.append(FaceHistory(
                     id=face_data.get("id", str(uuid.uuid4())[:8]),
                     camera_id=face_data.get("camera_id"),
-                    expressions=expressions_json,
+                    expressions=expressions,
                     dominant_emotion=face_data.get("dominant_emotion"),
                     confidence=face_data.get("confidence"),
                     timestamp=face_data.get("timestamp", datetime.now()),
@@ -110,18 +108,21 @@ class DatabaseDataStore:
                     pleasure=face_data.get("pleasure", 0),
                     pad_arousal=face_data.get("pad_arousal", 0),
                     dominance=face_data.get("dominance", 0),
-                )
-                face_records.append(face_record)
+                ))
             
-            # 批量插入
             session.bulk_save_objects(face_records)
             session.commit()
-            # print(f"[数据存储] 批量写入 {len(face_records)} 条人脸记录")
         except Exception as e:
-            session.rollback()
-            print(f"[数据存储] 批量写入失败: {e}")
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            print(f"[数据存储] 批量写入失败({len(batch)}条): {e}")
         finally:
-            session.close()
+            try:
+                session.close()
+            except Exception:
+                pass
 
     # ========== 用户相关 ==========
     def get_user(self, username: str) -> Optional[Dict]:
@@ -282,12 +283,11 @@ class DatabaseDataStore:
 
     # ========== 人脸历史相关 ==========
     def add_face_detection(self, detection_data: Dict):
-        """添加人脸检测记录到队列（异步批量写入）"""
+        """添加人脸检测记录到队列（非阻塞，队列满则丢弃）"""
         try:
             self._face_queue.put_nowait(detection_data)
         except queue.Full:
-            # 队列满时，丢弃旧数据
-            print("[数据存储] 队列已满，丢弃人脸记录")
+            pass  # 静默丢弃，不打断推理循环
 
     def get_face_history(self, start_date: Optional[datetime] = None,
                          end_date: Optional[datetime] = None,
@@ -328,7 +328,7 @@ class DatabaseDataStore:
                 .all()
             )
 
-            distribution = {emotion: count for emotion, count in results}
+            distribution = {emotion: count for emotion, count in results if emotion}
 
             if not distribution:
                 distribution = {
@@ -337,8 +337,17 @@ class DatabaseDataStore:
                 }
 
             return distribution
+        except Exception as e:
+            print(f"[数据存储] 查询情绪分布失败: {e}")
+            return {
+                "happy": 0, "sad": 0, "angry": 0, "neutral": 0,
+                "fearful": 0, "surprised": 0, "disgusted": 0,
+            }
         finally:
-            session.close()
+            try:
+                session.close()
+            except Exception:
+                pass
 
     def save_inference_result(self, inference_frame):
         """保存推理结果 (含离散+2D+3D情绪数据) - 使用队列异步批量写入"""
