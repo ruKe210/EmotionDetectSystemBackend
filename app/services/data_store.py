@@ -97,7 +97,7 @@ class DatabaseDataStore:
                     expressions = {}
 
                 face_records.append(FaceHistory(
-                    id=face_data.get("id", str(uuid.uuid4())[:8]),
+                    id=face_data.get("id", str(uuid.uuid4())[:12]),
                     camera_id=face_data.get("camera_id"),
                     expressions=expressions,
                     dominant_emotion=face_data.get("dominant_emotion"),
@@ -354,10 +354,10 @@ class DatabaseDataStore:
         if not inference_frame.faces:
             return
         
-        # 将所有人脸数据加入队列
+        # 将所有人脸数据加入队列，每条记录用唯一 ID
         for face in inference_frame.faces:
             face_data = {
-                "id": face.face_id,
+                "id": str(uuid.uuid4())[:12],
                 "camera_id": face.camera_id,
                 "expressions": face.expressions,
                 "dominant_emotion": face.dominant_emotion,
