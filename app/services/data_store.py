@@ -41,6 +41,10 @@ class DatabaseDataStore:
         self._writer_thread = None
         self._writer_running = False
         
+        # 存储节流：每秒只存一次
+        self._last_save_time = 0
+        self._save_interval = 1.0
+        
         # 启动批量写入线程
         self._start_batch_writer()
 
@@ -354,11 +358,15 @@ class DatabaseDataStore:
                 pass
 
     def save_inference_result(self, inference_frame):
-        """保存推理结果 (含离散+2D+3D情绪数据) - 使用队列异步批量写入"""
+        """保存推理结果 - 每秒只存一次"""
         if not inference_frame.faces:
             return
         
-        # 将所有人脸数据加入队列，每条记录用唯一 ID
+        now = time.time()
+        if now - self._last_save_time < self._save_interval:
+            return  # 距离上次存储不到1秒，跳过
+        self._last_save_time = now
+        
         for face in inference_frame.faces:
             face_data = {
                 "id": str(uuid.uuid4())[:12],
