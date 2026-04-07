@@ -358,14 +358,9 @@ class DatabaseDataStore:
                 pass
 
     def save_inference_result(self, inference_frame):
-        """保存推理结果 - 每秒只存一次"""
+        """保存推理结果 (含离散+2D+3D情绪数据) - 每帧都保存"""
         if not inference_frame.faces:
             return
-        
-        now = time.time()
-        if now - self._last_save_time < self._save_interval:
-            return  # 距离上次存储不到1秒，跳过
-        self._last_save_time = now
         
         for face in inference_frame.faces:
             face_data = {
