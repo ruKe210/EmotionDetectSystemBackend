@@ -14,16 +14,46 @@ from app.services.inference_engine import inference_engine
 
 
 def init_camera_thread():
-    """在后台线程中初始化摄像头"""
+    """在后台线程中初始化摄像头 — 从数据库加载已有摄像头"""
     import time
     time.sleep(2)  # 等待服务完全启动
     try:
-        print("\n[摄像头] 正在后台初始化摄像头...")
-        camera_id = inference_engine.add_camera(source=0, name="默认摄像头")
-        if camera_id:
-            print(f"[摄像头] ✓ 摄像头已启动: {camera_id}")
-        else:
-            print("[摄像头] ✗ 摄像头启动失败，请检查设备")
+        from app.services.data_store import data_store
+        cameras = data_store.get_all_cameras()
+
+        started = 0
+        for cam in cameras:
+            if cam.get("status") == "online":
+                cam_type = cam.get("type", "usb")
+                cam_id = cam.get("id", "")
+                cam_name = cam.get("name", "摄像头")
+
+                if cam_type == "rtsp":
+                    source = cam.get("rtsp_url", "")
+                else:
+                    source = cam.get("source_index", 0)
+
+                if source == "" or source is None:
+                    continue
+
+                print(f"\n[摄像头] 正在启动: {cam_name} ({cam_type}, id={cam_id})")
+                result = inference_engine.add_camera(source=source, name=cam_name, camera_id=cam_id)
+                if result:
+                    print(f"[摄像头] ✓ {cam_name} 已启动")
+                    started += 1
+                else:
+                    print(f"[摄像头] ✗ {cam_name} 启动失败")
+
+        # 如果数据库里没有任何摄像头，尝试启动默认 USB 摄像头
+        if started == 0 and len(cameras) == 0:
+            print("\n[摄像头] 数据库无摄像头记录，尝试启动默认 USB 摄像头...")
+            camera_id = inference_engine.add_camera(source=0, name="默认摄像头")
+            if camera_id:
+                print(f"[摄像头] ✓ 默认摄像头已启动: {camera_id}")
+            else:
+                print("[摄像头] ✗ 默认摄像头启动失败")
+
+        print(f"\n[摄像头] 初始化完成，已启动 {started} 个摄像头")
     except Exception as e:
         print(f"[摄像头] ✗ 摄像头初始化错误: {e}")
 
