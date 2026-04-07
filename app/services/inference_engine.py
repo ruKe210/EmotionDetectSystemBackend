@@ -169,30 +169,30 @@ class InferenceEngine:
             self.inference_thread.join(timeout=2)
         print("推理引擎已停止")
 
-    def add_camera(self, source: int = 0, name: str = "默认摄像头") -> str:
-        """添加摄像头"""
+    def add_camera(self, source = 0, name: str = "默认摄像头", camera_id: str = "") -> str:
+        """添加摄像头 (source: int=USB索引, str=RTSP URL)"""
         print(f"正在添加摄像头: {name}, source={source}")
 
         # 创建视频流
-        camera_id = video_manager.create_stream(source, name)
-        print(f"视频流已创建: {camera_id}")
+        cid = video_manager.create_stream(source, name, camera_id=camera_id)
+        print(f"视频流已创建: {cid}")
 
         # 启动视频流
-        if video_manager.start_stream(camera_id):
-            self.active_cameras[camera_id] = camera_id
-            print(f"摄像头 {name} ({camera_id}) 已添加并启动")
+        if video_manager.start_stream(cid):
+            self.active_cameras[cid] = cid
+            print(f"摄像头 {name} ({cid}) 已添加并启动")
 
             # 等待几帧确保摄像头正常工作
             time.sleep(0.5)
-            stream = video_manager.get_stream(camera_id)
+            stream = video_manager.get_stream(cid)
             if stream:
                 frame = stream.get_frame()
                 if frame is not None:
-                    print(f"摄像头 {camera_id} 可以正常读取帧，尺寸: {frame.shape}")
+                    print(f"摄像头 {cid} 可以正常读取帧，尺寸: {frame.shape}")
                 else:
-                    print(f"摄像头 {camera_id} 无法读取帧")
+                    print(f"摄像头 {cid} 无法读取帧")
 
-            return camera_id
+            return cid
         else:
             print(f"摄像头 {name} 启动失败")
             return None

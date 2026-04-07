@@ -235,6 +235,10 @@ class DatabaseDataStore:
                 status="offline",
                 resolution=camera_data.get("resolution", "640x480"),
                 fps=camera_data.get("fps", 30),
+                rtsp_url=camera_data.get("rtsp_url"),
+                rtsp_username=camera_data.get("rtsp_username"),
+                rtsp_password=camera_data.get("rtsp_password"),
+                source_index=camera_data.get("source_index", 0),
                 created_at=datetime.now(),
             )
             session.add(camera)

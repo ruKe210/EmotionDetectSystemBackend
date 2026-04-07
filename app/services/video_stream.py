@@ -3,18 +3,19 @@ import asyncio
 import threading
 import time
 import uuid
-from typing import Dict, Optional, Callable, List
+import os
+from typing import Dict, Optional, Callable, List, Union
 from datetime import datetime
 import numpy as np
 from app.core.config import settings
 
 
 class VideoStream:
-    """单个视频流管理器"""
+    """单个视频流管理器 - 支持 USB 和 RTSP"""
     
-    def __init__(self, camera_id: str, source: int or str, name: str = ""):
+    def __init__(self, camera_id: str, source: Union[int, str], name: str = ""):
         self.camera_id = camera_id
-        self.source = source  # 摄像头索引或视频文件路径
+        self.source = source  # 整数=USB索引, 字符串=RTSP URL
         self.name = name or f"Camera_{camera_id}"
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_running = False
@@ -28,6 +29,7 @@ class VideoStream:
         self.callbacks: List[Callable] = []
         self.last_frame_time = 0
         self.frame_interval = 1.0 / settings.VIDEO_FPS
+        self.is_rtsp = isinstance(source, str) and "rtsp://" in source
         
     def add_callback(self, callback: Callable):
         """添加帧处理回调函数"""
@@ -43,12 +45,24 @@ class VideoStream:
         if self.is_running:
             return True
         
-        # 在Windows上使用DirectShow后端，避免阻塞
-        if isinstance(self.source, int):
-            # 尝试使用DirectShow后端
+        if self.is_rtsp:
+            # RTSP 低延迟配置
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                "rtsp_transport;udp|"
+                "fflags;nobuffer|"
+                "flags;low_delay|"
+                "framedrop;1|"
+                "max_delay;500000|"
+                "analyzeduration;500000|"
+                "probesize;32768"
+            )
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+            if self.cap.isOpened():
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        elif isinstance(self.source, int):
+            # USB 摄像头：Windows 用 DirectShow
             self.cap = cv2.VideoCapture(self.source, cv2.CAP_DSHOW)
             if not self.cap.isOpened():
-                # 如果DirectShow失败，尝试默认后端
                 self.cap = cv2.VideoCapture(self.source)
         else:
             self.cap = cv2.VideoCapture(self.source)
@@ -57,10 +71,11 @@ class VideoStream:
             print(f"无法打开视频源: {self.source}")
             return False
             
-        # 设置分辨率
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.VIDEO_WIDTH)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.VIDEO_HEIGHT)
-        self.cap.set(cv2.CAP_PROP_FPS, settings.VIDEO_FPS)
+        # USB 摄像头设置分辨率，RTSP 由摄像头端决定
+        if not self.is_rtsp:
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.VIDEO_WIDTH)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.VIDEO_HEIGHT)
+            self.cap.set(cv2.CAP_PROP_FPS, settings.VIDEO_FPS)
         
         # 先读取一帧测试
         ret, test_frame = self.cap.read()
@@ -96,8 +111,20 @@ class VideoStream:
                 
             ret, frame = self.cap.read()
             if not ret:
-                # 如果是视频文件，循环播放
-                if isinstance(self.source, str):
+                if self.is_rtsp:
+                    # RTSP 断线重连
+                    print(f"视频流 {self.camera_id} RTSP 断线，尝试重连...")
+                    self.cap.release()
+                    time.sleep(1)
+                    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                        "rtsp_transport;udp|fflags;nobuffer|flags;low_delay|"
+                        "framedrop;1|max_delay;500000|analyzeduration;500000|probesize;32768"
+                    )
+                    self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+                    if self.cap.isOpened():
+                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    continue
+                elif isinstance(self.source, str):
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 else:
@@ -179,13 +206,15 @@ class VideoStreamManager:
         self.streams: Dict[str, VideoStream] = {}
         self._initialized = True
     
-    def create_stream(self, source: int or str = 0, name: str = "") -> str:
+    def create_stream(self, source: Union[int, str] = 0, name: str = "", camera_id: str = "") -> str:
         """创建新的视频流"""
-        camera_id = str(uuid.uuid4())[:8]
+        if not camera_id:
+            camera_id = str(uuid.uuid4())[:8]
         
-        # 如果source是整数，使用笔记本内置摄像头
-        if isinstance(source, int):
-            source = source
+        # 如果已存在同 ID 的流，先停掉
+        if camera_id in self.streams:
+            self.streams[camera_id].stop()
+            del self.streams[camera_id]
         
         stream = VideoStream(camera_id, source, name)
         self.streams[camera_id] = stream

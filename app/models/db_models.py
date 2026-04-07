@@ -40,6 +40,10 @@ class Camera(Base):
     status = Column(String(20), nullable=False, default="offline")
     resolution = Column(String(20), default="640x480")
     fps = Column(Integer, default=30)
+    rtsp_url = Column(String(500))
+    rtsp_username = Column(String(100))
+    rtsp_password = Column(String(255))
+    source_index = Column(Integer, default=0)
     last_seen = Column(DateTime)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
@@ -54,6 +58,9 @@ class Camera(Base):
             "status": self.status,
             "resolution": self.resolution,
             "fps": self.fps,
+            "rtsp_url": self.rtsp_url,
+            "rtsp_username": self.rtsp_username,
+            "source_index": self.source_index,
             "last_seen": self.last_seen,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
