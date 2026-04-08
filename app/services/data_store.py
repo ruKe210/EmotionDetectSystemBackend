@@ -103,10 +103,12 @@ class DatabaseDataStore:
                 face_records.append(FaceHistory(
                     id=face_data.get("id", str(uuid.uuid4())[:12]),
                     camera_id=face_data.get("camera_id"),
+                    face_index=face_data.get("face_index", 0),
                     expressions=expressions,
                     dominant_emotion=face_data.get("dominant_emotion"),
                     confidence=face_data.get("confidence"),
                     timestamp=face_data.get("timestamp", datetime.now()),
+                    frame_timestamp=face_data.get("frame_timestamp", 0),
                     valence=face_data.get("valence", 0),
                     arousal=face_data.get("arousal", 0),
                     pleasure=face_data.get("pleasure", 0),
@@ -362,14 +364,19 @@ class DatabaseDataStore:
         if not inference_frame.faces:
             return
         
-        for face in inference_frame.faces:
+        import time as _time
+        frame_ts = int(_time.time() * 1000)  # 毫秒级时间戳
+        
+        for idx, face in enumerate(inference_frame.faces):
             face_data = {
                 "id": str(uuid.uuid4())[:12],
                 "camera_id": face.camera_id,
+                "face_index": idx,
                 "expressions": face.expressions,
                 "dominant_emotion": face.dominant_emotion,
                 "confidence": face.confidence,
                 "timestamp": datetime.now(),
+                "frame_timestamp": frame_ts,
                 "valence": getattr(face, 'valence', 0.0),
                 "arousal": getattr(face, 'arousal', 0.0),
                 "pleasure": getattr(face, 'pleasure', 0.0),

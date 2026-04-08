@@ -84,3 +84,6 @@ app/websocket/__pycache__/routes.cpython-39.pyc
 app/__pycache__
 app/core/__pycache__
 app/models/__pycache__
+app/websocket/__pycache__
+app/services/__pycache__
+app/api/__pycache__

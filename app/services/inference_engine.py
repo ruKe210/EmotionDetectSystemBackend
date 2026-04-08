@@ -200,6 +200,8 @@ class InferenceEngine:
     def remove_camera(self, camera_id: str):
         """移除摄像头"""
         if camera_id in self.active_cameras:
+            from app.services.video_recorder import video_recorder
+            video_recorder.stop_camera(camera_id)
             video_manager.remove_stream(camera_id)
             del self.active_cameras[camera_id]
             print(f"摄像头 {camera_id} 已移除")
@@ -297,6 +299,12 @@ class InferenceEngine:
         self.stats["total_frames"] += 1
         self.stats["total_faces"] += len(faces_results)
         self.stats["inference_time_ms"] = inference_time
+
+        # 录制视频（带标注的帧）
+        from app.services.video_recorder import video_recorder
+        stream_obj = video_manager.get_stream(camera_id)
+        cam_name = stream_obj.name if stream_obj else camera_id
+        video_recorder.write_frame(camera_id, frame, cam_name)
 
         # 创建推理帧
         inference_frame = InferenceFrame(

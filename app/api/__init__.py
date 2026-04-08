@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api import auth, users, cameras, face, alerts, logs, config, reports, system, model
+from app.api import auth, users, cameras, face, alerts, logs, config, reports, system, model, video
 
 
 def register_router(app: FastAPI):
@@ -33,3 +33,6 @@ def register_router(app: FastAPI):
     
     # 模型管理
     app.include_router(model.router, prefix="/api/model", tags=["模型管理"])
+    
+    # 视频回放
+    app.include_router(video.router, prefix="/api/video", tags=["视频回放"])

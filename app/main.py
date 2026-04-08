@@ -3,6 +3,7 @@ import asyncio
 import threading
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -103,6 +104,10 @@ async def lifespan(app: FastAPI):
     # 停止推理引擎
     inference_engine.stop()
     
+    # 停止视频录制
+    from app.services.video_recorder import video_recorder
+    video_recorder.stop_all()
+    
     print("✓ 后端服务已关闭")
     print("=" * 60 + "\n")
 
@@ -129,6 +134,12 @@ register_router(app)
 
 # 注册WebSocket路由
 app.include_router(websocket_router)
+
+# 挂载录制视频静态文件
+import os
+recordings_dir = os.path.join(settings.DATA_STORAGE_PATH, "recordings")
+os.makedirs(recordings_dir, exist_ok=True)
+app.mount("/recordings", StaticFiles(directory=recordings_dir), name="recordings")
 
 
 @app.get("/")

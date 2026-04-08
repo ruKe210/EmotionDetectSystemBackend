@@ -72,10 +72,12 @@ class FaceHistory(Base):
 
     id = Column(String(50), primary_key=True)
     camera_id = Column(String(50))
+    face_index = Column(Integer, default=0)
     expressions = Column(JSON)
     dominant_emotion = Column(String(30))
     confidence = Column(Double)
     timestamp = Column(DateTime, nullable=False, server_default=func.now())
+    frame_timestamp = Column(Integer, default=0)  # 毫秒级时间戳，用于视频对齐
     valence = Column(Double, default=0)
     arousal = Column(Double, default=0)
     pleasure = Column(Double, default=0)
@@ -86,10 +88,12 @@ class FaceHistory(Base):
         return {
             "id": self.id,
             "camera_id": self.camera_id,
+            "face_index": self.face_index,
             "expressions": self.expressions,
             "dominant_emotion": self.dominant_emotion,
             "confidence": self.confidence,
             "timestamp": self.timestamp,
+            "frame_timestamp": self.frame_timestamp,
             "valence": self.valence,
             "arousal": self.arousal,
             "pleasure": self.pleasure,
@@ -161,3 +165,38 @@ class SystemConfig(Base):
     config_key = Column(String(50), unique=True, nullable=False)
     config_value = Column(JSON, nullable=False)
     updated_at = Column(DateTime, onupdate=func.now(), server_default=func.now())
+
+
+class VideoRecord(Base):
+    __tablename__ = "video_records"
+
+    id = Column(String(50), primary_key=True)
+    camera_id = Column(String(50), nullable=False)
+    camera_name = Column(String(100))
+    file_path = Column(String(500), nullable=False)
+    file_name = Column(String(200), nullable=False)
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime)
+    duration = Column(Integer, default=0)
+    file_size = Column(Integer, default=0)
+    fps = Column(Integer, default=10)
+    resolution = Column(String(20), default='640x480')
+    status = Column(String(20), default='recording')
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "camera_id": self.camera_id,
+            "camera_name": self.camera_name,
+            "file_path": self.file_path,
+            "file_name": self.file_name,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "duration": self.duration,
+            "file_size": self.file_size,
+            "fps": self.fps,
+            "resolution": self.resolution,
+            "status": self.status,
+            "created_at": self.created_at,
+        }
