@@ -109,6 +109,9 @@ class Alert(Base):
     title = Column(String(200), nullable=False)
     description = Column(Text)
     device = Column(String(50))
+    face_image = Column(String(500))
+    emotion = Column(String(30))
+    duration = Column(Integer, default=0)
     level = Column(String(20), nullable=False, default="info")
     type = Column(String(30), nullable=False, default="system")
     status = Column(String(20), nullable=False, default="pending")
@@ -123,6 +126,9 @@ class Alert(Base):
             "title": self.title,
             "description": self.description,
             "device": self.device,
+            "face_image": self.face_image,
+            "emotion": self.emotion,
+            "duration": self.duration,
             "level": self.level,
             "type": self.type,
             "status": self.status,

@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from datetime import datetime
-from app.schemas import ResponseModel, AlertCreate, AlertUpdate, PaginatedResponse
+from app.schemas import ResponseModel, AlertCreate, AlertUpdate, AlertHandleRequest, PaginatedResponse
 from app.api.deps import get_current_active_user, get_current_admin_user
 from app.services.data_store import data_store
 
@@ -41,18 +41,23 @@ async def get_alert(
 @router.post("/{alert_id}/handle", response_model=ResponseModel)
 async def handle_alert(
     alert_id: str,
+    body: AlertHandleRequest,
     current_user: dict = Depends(get_current_admin_user)
 ):
-    """处理告警"""
+    """处理告警（可附带处理备注）"""
     alert = data_store.get_alert(alert_id)
     if not alert:
         return ResponseModel(code=404, message="告警不存在")
     
-    data_store.update_alert(alert_id, {
+    update_data = {
         "status": "handled",
         "handled_by": current_user["username"],
-        "handled_at": datetime.now()
-    })
+        "handled_at": datetime.now(),
+    }
+    if body.note:
+        update_data["handle_note"] = body.note
+
+    data_store.update_alert(alert_id, update_data)
     return ResponseModel(message="处理成功")
 
 

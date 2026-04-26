@@ -21,8 +21,15 @@ class AlertUpdate(BaseModel):
     handle_note: Optional[str] = None
 
 
+class AlertHandleRequest(BaseModel):
+    note: Optional[str] = None
+
+
 class Alert(AlertBase):
     id: str
+    face_image: Optional[str] = None
+    emotion: Optional[str] = None
+    duration: int = 0
     status: str = "pending"
     time: datetime
     handled_by: Optional[str] = None

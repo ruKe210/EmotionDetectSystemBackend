@@ -2,7 +2,7 @@ from .user import User, UserCreate, UserUpdate, UserLogin
 from .camera import Camera, CameraCreate, CameraUpdate
 from .face import FaceDetection, FaceExpression, FaceStats, FaceHistory
 from .emotion import EmotionResult, DiscreteEmotion, ContinuousEmotion2D, ContinuousEmotion3D
-from .alert import Alert, AlertCreate, AlertUpdate
+from .alert import Alert, AlertCreate, AlertUpdate, AlertHandleRequest
 from .log import LogEntry, LogQuery
 from .config import SystemConfig, VideoConfig, RecognitionConfig, StorageConfig
 from .report import ReportSummary, EmotionDistribution, HourlyStats, TrendData
@@ -13,7 +13,7 @@ __all__ = [
     "Camera", "CameraCreate", "CameraUpdate",
     "FaceDetection", "FaceExpression", "FaceStats", "FaceHistory",
     "EmotionResult", "DiscreteEmotion", "ContinuousEmotion2D", "ContinuousEmotion3D",
-    "Alert", "AlertCreate", "AlertUpdate",
+    "Alert", "AlertCreate", "AlertUpdate", "AlertHandleRequest",
     "LogEntry", "LogQuery",
     "SystemConfig", "VideoConfig", "RecognitionConfig", "StorageConfig",
     "ReportSummary", "EmotionDistribution", "HourlyStats", "TrendData",

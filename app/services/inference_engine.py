@@ -294,6 +294,16 @@ class InferenceEngine:
                 # 在帧上绘制人脸信息
                 self._draw_face_info(frame, face_result)
 
+                # 情绪告警检测
+                from app.services.emotion_alert import emotion_alert
+                emotion_alert.process_face(
+                    face_id=face_result.face_id,
+                    camera_id=camera_id,
+                    dominant_emotion=face_result.dominant_emotion,
+                    confidence=face_result.emotion_confidence,
+                    frame=face_img.copy(),
+                )
+
         # 更新统计
         inference_time = (time.time() - inference_start) * 1000
         self.stats["total_frames"] += 1

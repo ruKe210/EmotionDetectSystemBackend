@@ -141,6 +141,11 @@ recordings_dir = os.path.join(settings.DATA_STORAGE_PATH, "recordings")
 os.makedirs(recordings_dir, exist_ok=True)
 app.mount("/recordings", StaticFiles(directory=recordings_dir), name="recordings")
 
+# 挂载告警截图静态文件
+alert_img_dir = os.path.join(settings.DATA_STORAGE_PATH, "alert_images")
+os.makedirs(alert_img_dir, exist_ok=True)
+app.mount("/alert_images", StaticFiles(directory=alert_img_dir), name="alert_images")
+
 
 @app.get("/")
 async def root():
