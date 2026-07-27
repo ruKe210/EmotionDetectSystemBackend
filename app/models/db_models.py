@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Double, Text, JSON, func
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Double, Text, JSON, func
 from app.core.database import Base
 
 
@@ -77,7 +77,7 @@ class FaceHistory(Base):
     dominant_emotion = Column(String(30))
     confidence = Column(Double)
     timestamp = Column(DateTime, nullable=False, server_default=func.now())
-    frame_timestamp = Column(Integer, default=0)  # 毫秒级时间戳，用于视频对齐
+    frame_timestamp = Column(BigInteger, default=0)  # 毫秒级时间戳，用于视频对齐
     valence = Column(Double, default=0)
     arousal = Column(Double, default=0)
     pleasure = Column(Double, default=0)

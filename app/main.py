@@ -1,6 +1,7 @@
 import uvicorn
 import asyncio
 import threading
+import time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +13,8 @@ from app.api import register_router
 from app.websocket.routes import router as websocket_router
 from app.websocket.manager import websocket_manager
 from app.services.inference_engine import inference_engine
+from app.services.data_store import data_store
+from app.services.performance_monitor import performance_monitor
 
 
 def init_camera_thread():
@@ -76,6 +79,13 @@ async def lifespan(app: FastAPI):
     print("\n[2/3] 启动WebSocket广播服务...")
     websocket_manager.start_broadcast_loop()
     print("✓ WebSocket服务已启动")
+
+    # 启动论文性能测试表定时打印
+    performance_monitor.start_periodic_print(
+        data_store.get_write_stats,
+        interval_seconds=10,
+        get_camera_ids=lambda: list(inference_engine.active_cameras.keys()),
+    )
     
     # 3. 在后台线程中初始化摄像头（不阻塞启动）
     print("\n[3/3] 后台初始化摄像头...")
@@ -100,6 +110,9 @@ async def lifespan(app: FastAPI):
     
     # 停止WebSocket广播
     websocket_manager.stop()
+
+    # 停止性能测试表定时打印
+    performance_monitor.stop_periodic_print()
     
     # 停止推理引擎
     inference_engine.stop()
@@ -128,6 +141,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def collect_report_api_metrics(request, call_next):
+    """记录报表接口响应时间，供论文性能测试表使用。"""
+    start = time.time()
+    response = await call_next(request)
+    if request.url.path.startswith("/api/reports"):
+        performance_monitor.record_report_response((time.time() - start) * 1000)
+    return response
 
 # 注册API路由
 register_router(app)

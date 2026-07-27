@@ -1,17 +1,15 @@
-from io import BytesIO
 from calendar import monthrange
+import os
+import asyncio
 from typing import Optional, Tuple
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
 from datetime import datetime, timedelta
 from sqlalchemy import func
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from openai import OpenAI
 
 from app.schemas import ResponseModel
 from app.api.deps import get_current_active_user
+from app.core.config import settings
 from app.core.database import get_db_session
 from app.models.db_models import FaceHistory, Alert
 
@@ -117,6 +115,74 @@ def _build_summary(session, start_dt: datetime, end_dt: datetime, device: Option
         "alerts": alert_count,
         "dominantEmotion": dominant_emotion,
     }
+
+
+def _build_analysis_context(session, start_dt: datetime, end_dt: datetime, device: Optional[str]):
+    summary = _build_summary(session, start_dt, end_dt, device)
+
+    emotion_rows = _apply_face_filters(
+        session.query(FaceHistory.dominant_emotion, func.count(FaceHistory.id).label("count")),
+        start_dt,
+        end_dt,
+        device,
+    ).group_by(FaceHistory.dominant_emotion).order_by(func.count(FaceHistory.id).desc()).all()
+
+    hourly_rows = _apply_face_filters(
+        session.query(func.hour(FaceHistory.timestamp).label("hour"), func.count(FaceHistory.id).label("count")),
+        start_dt,
+        end_dt,
+        device,
+    ).group_by(func.hour(FaceHistory.timestamp)).all()
+
+    emotion_distribution = []
+    total_emotions = sum(r[1] for r in emotion_rows) or 1
+    for emotion, count in emotion_rows:
+        emotion_distribution.append(
+            {
+                "emotion": emotion or "unknown",
+                "count": int(count),
+                "pct": round(count / total_emotions * 100, 2),
+            }
+        )
+
+    hourly_data = [{"hour": int(h), "count": int(c)} for h, c in hourly_rows]
+    hourly_data.sort(key=lambda x: x["hour"])
+    peak_hours = sorted(hourly_data, key=lambda x: x["count"], reverse=True)[:3]
+
+    return {
+        "time_range": {
+            "start": start_dt.strftime("%Y-%m-%d"),
+            "end": (end_dt - timedelta(days=1)).strftime("%Y-%m-%d"),
+        },
+        "device": device or "all",
+        "summary": summary,
+        "emotion_distribution": emotion_distribution,
+        "hourly_data": hourly_data,
+        "peak_hours": peak_hours,
+    }
+
+
+def _candidate_models(primary_model: str) -> list:
+    """按优先级返回可尝试的方舟模型名。"""
+    fallbacks = [
+        "doubao-1-5-lite-32k-250115",
+        "doubao-1.5-lite-4k",
+        "doubao-1-5-lite-4k",
+    ]
+    ordered = [primary_model] + fallbacks
+    deduped = []
+    for m in ordered:
+        if m and m not in deduped:
+            deduped.append(m)
+    return deduped
+
+
+def _mask_key(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 10:
+        return key[:3] + "***"
+    return f"{key[:8]}...{key[-6:]}"
 
 
 @router.get("/summary", response_model=ResponseModel)
@@ -268,98 +334,100 @@ async def get_trend_data(
         session.close()
 
 
-@router.get("/export-pdf")
-async def export_pdf_report(
+@router.get("/intelligent-analysis", response_model=ResponseModel)
+async def get_intelligent_analysis(
     reportType: str = "daily",
     startDate: Optional[str] = None,
     endDate: Optional[str] = None,
     device: Optional[str] = None,
     current_user: dict = Depends(get_current_active_user)
 ):
-    """导出PDF报表"""
+    """生成智能分析文本（供前端展示和PDF写入）"""
     session = get_db_session()
     try:
         start_dt, end_dt = _resolve_time_range(reportType, startDate, endDate)
-        summary = _build_summary(session, start_dt, end_dt, device)
+        context_data = _build_analysis_context(session, start_dt, end_dt, device)
 
-        emotion_rows = _apply_face_filters(
-            session.query(FaceHistory.dominant_emotion, func.count(FaceHistory.id).label("count")),
-            start_dt,
-            end_dt,
-            device,
-        ).group_by(FaceHistory.dominant_emotion).order_by(func.count(FaceHistory.id).desc()).all()
-
-        total_emotions = sum(r[1] for r in emotion_rows) or 1
-
-        output = BytesIO()
-        doc = SimpleDocTemplate(output, pagesize=A4)
-        styles = getSampleStyleSheet()
-        elements = []
-
-        elements.append(Paragraph("Emotion Detection Report", styles["Title"]))
-        elements.append(Spacer(1, 8))
-        elements.append(
-            Paragraph(
-                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-                f"Range: {start_dt.strftime('%Y-%m-%d')} ~ {(end_dt - timedelta(days=1)).strftime('%Y-%m-%d')}",
-                styles["Normal"],
+        api_key = settings.ARK_API_KEY or os.getenv("ARK_API_KEY", "")
+        if not api_key:
+            return ResponseModel(
+                data={
+                    "analysis": (
+                        "智能分析未启用：请在后端 .env 中配置 ARK_API_KEY 后重试。\n"
+                        f"当前统计：总识别 {context_data['summary']['total']} 次，"
+                        f"告警 {context_data['summary']['alerts']} 次，"
+                        f"主导情绪 {context_data['summary']['dominantEmotion']}。"
+                    )
+                }
             )
-        )
-        if device:
-            elements.append(Paragraph(f"Device: {device}", styles["Normal"]))
-        elements.append(Spacer(1, 12))
 
-        summary_table = Table(
-            [
-                ["Metric", "Value"],
-                ["Total Detections", str(summary["total"])],
-                ["Average Confidence", f'{summary["accuracy"] * 100:.2f}%'],
-                ["Alert Count", str(summary["alerts"])],
-                ["Dominant Emotion", summary["dominantEmotion"]],
-            ],
-            colWidths=[180, 280],
-        )
-        summary_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9eefc")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#2d3436")),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#dfe6e9")),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ]
+        try:
+            base_url = (settings.ARK_BASE_URL or "").strip()
+            post_url = base_url
+            masked_key = _mask_key(api_key)
+            print(f"[AI分析] POST URL: {post_url}")
+            print(f"[AI分析] 当前模型: {settings.ARK_MODEL}")
+            print(f"[AI分析] 当前Key(脱敏): {masked_key}")
+            print(
+                f"[AI分析] CURL(脱敏): curl {post_url} -H \"Content-Type: application/json\" "
+                f"-H \"Authorization: Bearer {masked_key}\" -d '{{\"model\":\"{settings.ARK_MODEL}\",\"messages\":[...]}}'"
             )
-        )
-        elements.append(summary_table)
-        elements.append(Spacer(1, 14))
 
-        distribution_data = [["Emotion", "Count", "Percent"]]
-        for emotion, count in emotion_rows:
-            distribution_data.append([emotion or "unknown", str(count), f"{count / total_emotions * 100:.2f}%"])
-        if len(distribution_data) == 1:
-            distribution_data.append(["-", "0", "0.00%"])
-
-        distribution_table = Table(distribution_data, colWidths=[180, 120, 160])
-        distribution_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f6f8ff")),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#dfe6e9")),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-                ]
+            # 与 test_ark_api_connectivity.py 保持一致：直接使用 OpenAI 兼容调用
+            client = OpenAI(api_key=api_key, base_url=base_url)
+            prompt = (
+                "请基于以下情绪识别统计数据输出正式中文分析，要求包含：\n"
+                "1) 总体结论（1段）\n"
+                "2) 风险点与异常时段（2-4条）\n"
+                "3) 优化建议（2-4条）\n"
+                "4) 适合写入报告正文的结论段（1段）\n\n"
+                f"数据：{context_data}"
             )
-        )
-        elements.append(Paragraph("Emotion Distribution", styles["Heading3"]))
-        elements.append(distribution_table)
 
-        doc.build(elements)
-        output.seek(0)
-        filename = f"emotion_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        return StreamingResponse(
-            output,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
+            last_error = None
+            used_model = None
+            for model_name in _candidate_models(settings.ARK_MODEL):
+                used_model = model_name
+                try:
+                    resp = await asyncio.to_thread(
+                        client.chat.completions.create,
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": "你是一个数据分析助手，擅长把后端统计整理成正式中文报告文本。"},
+                            {"role": "user", "content": prompt},
+                        ],
+                    )
+                    content = (resp.choices[0].message.content or "").strip()
+                    if content:
+                        return ResponseModel(data={"analysis": content})
+                    last_error = "模型返回空内容"
+                except Exception as model_err:
+                    last_error = str(model_err)
+                    continue
+
+            return ResponseModel(
+                data={
+                    "analysis": (
+                        "智能分析调用失败：所有候选模型均不可用。\n"
+                        f"最后尝试模型：{used_model}\n"
+                        f"错误信息：{last_error}\n"
+                        f"当前统计：总识别 {context_data['summary']['total']} 次，"
+                        f"告警 {context_data['summary']['alerts']} 次，"
+                        f"主导情绪 {context_data['summary']['dominantEmotion']}。"
+                    )
+                }
+            )
+        except Exception as e:
+            return ResponseModel(
+                data={
+                    "analysis": (
+                        "智能分析调用失败，请检查 ARK 配置或网络连通性。\n"
+                        f"错误信息：{str(e)}\n"
+                        f"当前统计：总识别 {context_data['summary']['total']} 次，"
+                        f"告警 {context_data['summary']['alerts']} 次，"
+                        f"主导情绪 {context_data['summary']['dominantEmotion']}。"
+                    )
+                }
+            )
     finally:
         session.close()

@@ -23,6 +23,7 @@ from app.services.onnx_emotion_recognizer import onnx_emotion_recognizer
 from app.services.opencv_emotion_recognizer import opencv_emotion_recognizer
 from app.services.hsemotion_recognizer import hsemotion_recognizer
 from app.services.data_store import data_store
+from app.services.performance_monitor import performance_monitor
 
 
 @dataclass
@@ -211,27 +212,25 @@ class InferenceEngine:
         last_time = time.time()
         frame_count = 0
         
-        print(f"[推理循环] 启动，活跃摄像头: {list(self.active_cameras.keys())}")
+        # 降低日志噪声：关闭高频推理循环调试日志
 
         while self.is_running:
             loop_start = time.time()
             
             # 调试：打印活跃摄像头数量
-            if frame_count % 100 == 0:
-                print(f"[推理循环] 活跃摄像头数: {len(self.active_cameras)}, IDs: {list(self.active_cameras.keys())}")
+            # if frame_count % 100 == 0:
+            #     print(f"[推理循环] 活跃摄像头数: {len(self.active_cameras)}, IDs: {list(self.active_cameras.keys())}")
 
             # 对每个活跃摄像头进行推理
             for camera_id in list(self.active_cameras.keys()):
-                try:
-                    self._process_camera(camera_id)
-                except Exception as e:
-                    print(f"处理摄像头 {camera_id} 时出错: {e}")
+                self._process_camera(camera_id)
 
             # 计算FPS
             frame_count += 1
             current_time = time.time()
             if current_time - last_time >= 1.0:
                 self.stats["fps"] = frame_count
+                performance_monitor.record_fps(frame_count)
                 frame_count = 0
                 last_time = current_time
 
@@ -244,97 +243,83 @@ class InferenceEngine:
         """处理单个摄像头的帧"""
         stream = video_manager.get_stream(camera_id)
         if not stream:
+            performance_monitor.record_camera_cycle(camera_id, False)
             return
 
-        # 获取帧
         frame = stream.get_frame()
         if frame is None:
-            if self.stats["total_frames"] % 30 == 0:  # 每30帧打印一次
-                print(f"[推理] 摄像头 {camera_id} 无法获取帧，流状态: {stream.get_status()}")
+            performance_monitor.record_camera_cycle(camera_id, False)
             return
-        
-        # 调试：每30帧打印一次成功获取帧的信息
-        if self.stats["total_frames"] % 30 == 0:
-            print(f"[推理] 成功获取帧，尺寸: {frame.shape}")
 
-        if self.stats["total_frames"] % 100 == 0:
-            print(f"[推理] 处理帧 {self.stats['total_frames']}, 尺寸: {frame.shape}")
-
+        success = False
         inference_start = time.time()
-
-        # 1. 人脸检测（优先使用 YOLOv8-face）
-        if yolo_face_detector.session is not None:
-            detections = yolo_face_detector.detect(frame)
-        else:
-            detections = face_detector.detect(frame)
-        
-        # 调试：打印检测到的脸数量
-        if len(detections) > 0:
-            print(f"[检测] 发现 {len(detections)} 个人脸")
-
-        # 2. 情绪识别 (对每个检测到的人脸)
-        faces_results = []
-        for i, detection in enumerate(detections):
-            # 裁剪人脸
-            # YOLO返回的是FaceBox对象，face_detector返回的是FaceDetectionResult对象
-            if hasattr(detection, 'box'):
-                box = detection.box
+        try:
+            if yolo_face_detector.session is not None:
+                detections = yolo_face_detector.detect(frame)
             else:
-                box = detection  # FaceBox对象本身
-            face_img = frame[box.y:box.y+box.height, box.x:box.x+box.width]
+                detections = face_detector.detect(frame)
 
-            if face_img.size == 0:
-                continue
+            faces_results = []
+            for i, detection in enumerate(detections):
+                if hasattr(detection, "box"):
+                    box = detection.box
+                else:
+                    box = detection
+                face_img = frame[box.y : box.y + box.height, box.x : box.x + box.width]
 
-            # 使用当前激活的识别器
-            face_result = self._recognize_emotion(face_img, detection, i, camera_id)
-            if face_result:
-                faces_results.append(face_result)
+                if face_img.size == 0:
+                    continue
 
-                # 在帧上绘制人脸信息
-                self._draw_face_info(frame, face_result)
+                face_result = self._recognize_emotion(face_img, detection, i, camera_id)
+                if face_result:
+                    faces_results.append(face_result)
+                    self._draw_face_info(frame, face_result)
 
-                # 情绪告警检测
-                from app.services.emotion_alert import emotion_alert
-                emotion_alert.process_face(
-                    face_id=face_result.face_id,
-                    camera_id=camera_id,
-                    dominant_emotion=face_result.dominant_emotion,
-                    confidence=face_result.emotion_confidence,
-                    frame=face_img.copy(),
-                )
+                    from app.services.emotion_alert import emotion_alert
 
-        # 更新统计
-        inference_time = (time.time() - inference_start) * 1000
-        self.stats["total_frames"] += 1
-        self.stats["total_faces"] += len(faces_results)
-        self.stats["inference_time_ms"] = inference_time
+                    emotion_alert.process_face(
+                        face_id=face_result.face_id,
+                        camera_id=camera_id,
+                        dominant_emotion=face_result.dominant_emotion,
+                        confidence=face_result.emotion_confidence,
+                        frame=face_img.copy(),
+                    )
 
-        # 录制视频（带标注的帧）
-        from app.services.video_recorder import video_recorder
-        stream_obj = video_manager.get_stream(camera_id)
-        cam_name = stream_obj.name if stream_obj else camera_id
-        video_recorder.write_frame(camera_id, frame, cam_name)
+            inference_time = (time.time() - inference_start) * 1000
+            self.stats["total_frames"] += 1
+            self.stats["total_faces"] += len(faces_results)
+            self.stats["inference_time_ms"] = inference_time
+            performance_monitor.record_inference(
+                inference_time, fps=None, camera_id=camera_id
+            )
 
-        # 创建推理帧
-        inference_frame = InferenceFrame(
-            camera_id=camera_id,
-            frame_id=self.stats["total_frames"],
-            timestamp=datetime.now().isoformat(),
-            faces=faces_results
-        )
+            from app.services.video_recorder import video_recorder
 
-        # 存储到数据库
-        data_store.save_inference_result(inference_frame)
+            stream_obj = video_manager.get_stream(camera_id)
+            cam_name = stream_obj.name if stream_obj else camera_id
+            video_recorder.write_frame(camera_id, frame, cam_name)
 
-        # 编码帧为base64（用于视频流）
-        if self.frame_callbacks:
-            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            import base64
-            inference_frame.frame_base64 = base64.b64encode(buffer).decode('utf-8')
+            inference_frame = InferenceFrame(
+                camera_id=camera_id,
+                frame_id=self.stats["total_frames"],
+                timestamp=datetime.now().isoformat(),
+                faces=faces_results,
+            )
 
-        # 触发回调
-        self._trigger_callbacks(inference_frame)
+            data_store.save_inference_result(inference_frame)
+
+            if self.frame_callbacks:
+                _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                import base64
+
+                inference_frame.frame_base64 = base64.b64encode(buffer).decode("utf-8")
+
+            self._trigger_callbacks(inference_frame)
+            success = True
+        except Exception as e:
+            print(f"处理摄像头 {camera_id} 时出错: {e}")
+        finally:
+            performance_monitor.record_camera_cycle(camera_id, success)
 
     def _recognize_emotion(self, face_img, detection, index, camera_id) -> Optional[FaceResult]:
         """
@@ -367,9 +352,7 @@ class InferenceEngine:
             pad_arousal = result.pad_arousal
             dominance = result.dominance
             
-            # 调试：打印情绪识别结果
-            print(f"[识别] 人脸 {face_id}: 情绪={dominant_emotion}, 置信度={emotion_confidence:.2f}, "
-                  f"V={valence:+.2f}, A={arousal:+.2f}")
+            # 关闭高频识别结果日志
 
         elif self.emotion_recognizer_type == "opencv":
             result = opencv_emotion_recognizer.recognize(face_img)

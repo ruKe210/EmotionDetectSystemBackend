@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from typing import List
 import os
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -69,9 +70,30 @@ class Settings(BaseSettings):
     
     # 摄像头配置
     DEFAULT_CAMERA_ID: int = 0  # 默认使用笔记本内置摄像头
+    VIDEO_RECORD_SEGMENT_SECONDS: int = 60
+
+    # 前端可配置识别参数（持久化到 .env）
+    RECOGNITION_MODEL_TYPE: str = "discrete"
+    RECOGNITION_DELAY_THRESHOLD: int = 200
+    RECOGNITION_ACCURACY_THRESHOLD: float = 0.85
+    RECOGNITION_EMOTION_CHANGE_THRESHOLD: float = 0.2
+
+    # 前端可配置存储参数（持久化到 .env）
+    STORAGE_PERIOD_DAYS: int = 30
+    STORAGE_AUTO_BACKUP: bool = True
+    STORAGE_BACKUP_FREQUENCY: str = "weekly"
+
+    # 前端可配置权限默认项（持久化到 .env）
+    PERMISSION_DEFAULT_ROLE: str = "admin"
+    PERMISSION_DEFAULT_ACTIONS: str = "read,write,delete,config"
+
+    # 智能分析（火山方舟 OpenAI 兼容）
+    ARK_API_KEY: str = ""
+    ARK_BASE_URL: str = ""
+    ARK_MODEL: str = ""
     
     class Config:
-        env_file = ".env"
+        env_file = str(Path(__file__).resolve().parents[2] / ".env")
         case_sensitive = True
 
 

@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api import auth, users, cameras, face, alerts, logs, config, reports, system, model, video
+from app.api import auth, users, cameras, face, alerts, logs, config, reports, system, model, video, performance
 
 
 def register_router(app: FastAPI):
@@ -36,3 +36,6 @@ def register_router(app: FastAPI):
     
     # 视频回放
     app.include_router(video.router, prefix="/api/video", tags=["视频回放"])
+
+    # 性能测试
+    app.include_router(performance.router, prefix="/api/performance", tags=["性能测试"])

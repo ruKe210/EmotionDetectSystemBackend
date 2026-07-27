@@ -1,222 +1,139 @@
-# 情绪识别管理系统后端
+# EmotionDetectSystemBackend 后端说明
 
-基于机器视觉的情绪识别管理系统后端服务，使用 FastAPI 框架开发。
+基于 FastAPI 的情绪识别后端，提供实时识别、告警、报表统计、智能分析与 WebSocket 推送能力。
 
-## 功能特性
+## 1. 主要功能
 
-- **视频流管理**: 支持多路视频流（最多8路），可调用笔记本内置摄像头
-- **人脸检测**: 预留 MTCNN 等算法接口，当前使用模拟数据
-- **情绪识别**: 预留 CNN+LSTM 模型接口，支持离散+连续情绪识别
-- **实时推送**: WebSocket 实时推送人脸检测、统计数据、告警信息
-- **数据存储**: 模拟数据存储，预留数据库接口
-- **RESTful API**: 完整的 API 接口，支持用户、摄像头、告警、日志等管理
+- 摄像头管理与推理引擎调度
+- 人脸历史记录存储与统计
+- 告警生成与处理（含处理备注）
+- 报表接口（摘要、情绪分布、时段频次、趋势）
+- 智能分析接口（火山方舟 OpenAI 兼容）
+- WebSocket 实时推送
+- 告警截图与录制文件静态挂载
 
-## 项目结构
+## 2. 技术栈
 
-```
-backend/
-├── app/
-│   ├── api/                    # API路由
-│   │   ├── __init__.py
-│   │   ├── auth.py            # 认证接口
-│   │   ├── users.py           # 用户管理
-│   │   ├── cameras.py         # 摄像头管理
-│   │   ├── face.py            # 人脸识别
-│   │   ├── alerts.py          # 告警管理
-│   │   ├── logs.py            # 日志管理
-│   │   ├── config.py          # 系统配置
-│   │   ├── reports.py         # 报表统计
-│   │   ├── system.py          # 系统状态
-│   │   ├── model.py           # 模型管理
-│   │   └── deps.py            # 依赖注入
-│   ├── core/                   # 核心配置
-│   │   ├── config.py          # 应用配置
-│   │   └── security.py        # 安全相关
-│   ├── schemas/                # 数据模型
-│   │   ├── common.py
-│   │   ├── user.py
-│   │   ├── camera.py
-│   │   ├── face.py
-│   │   ├── emotion.py
-│   │   ├── alert.py
-│   │   ├── log.py
-│   │   ├── config.py
-│   │   └── report.py
-│   ├── services/               # 业务逻辑
-│   │   ├── video_stream.py    # 视频流管理
-│   │   ├── face_detection.py  # 人脸检测
-│   │   ├── emotion_recognition.py  # 情绪识别
-│   │   └── data_store.py      # 数据存储
-│   ├── websocket/              # WebSocket
-│   │   ├── manager.py         # 连接管理
-│   │   └── routes.py          # 路由定义
-│   └── main.py                 # 应用入口
-├── start.py                    # 启动脚本
-├── requirements.txt            # 依赖列表
-├── .env.example               # 环境变量示例
-└── README.md                  # 项目说明
+- FastAPI
+- SQLAlchemy
+- Pydantic / pydantic-settings
+- OpenAI Python SDK（对接 ARK）
+- OpenCV / ONNX Runtime
+- Uvicorn
+
+## 3. 目录结构（核心）
+
+```text
+app/
+├── api/                 # REST API 路由
+├── core/                # 配置、数据库等核心模块
+├── models/              # ORM 模型
+├── schemas/             # Pydantic 模型
+├── services/            # 推理、告警、业务服务
+├── websocket/           # WebSocket 路由与管理
+└── main.py              # 应用入口
 ```
 
-## 快速开始
+## 4. 环境准备
 
-### 1. 安装依赖
+- Python 3.10+（建议）
+- MySQL（默认库名：`emotion_detect`）
+
+安装依赖：
 
 ```bash
+cd EmotionDetectSystemBackend
 pip install -r requirements.txt
 ```
 
-或者使用启动脚本自动安装：
+## 5. 启动方式
+
+方式一（推荐）：
 
 ```bash
-python start.py --install
-```
-
-### 2. 启动服务
-
-```bash
-# 使用启动脚本
 python start.py
-
-# 或者使用 uvicorn 直接启动
-uvicorn app.main:app --reload
 ```
 
-### 3. 访问服务
+方式二：
 
-- API文档: http://localhost:8000/docs
-- 健康检查: http://localhost:8000/health
-- WebSocket: ws://localhost:8000/ws/face
-
-## API 接口列表
-
-### 认证接口
-- `POST /api/auth/login` - 用户登录
-- `POST /api/auth/logout` - 用户登出
-- `POST /api/auth/refresh` - 刷新令牌
-
-### 用户管理
-- `GET /api/users` - 获取用户列表
-- `POST /api/users` - 创建用户
-- `PUT /api/users/{id}` - 更新用户
-- `DELETE /api/users/{id}` - 删除用户
-- `PUT /api/users/{id}/status` - 更新用户状态
-
-### 摄像头管理
-- `GET /api/camera/list` - 获取摄像头列表
-- `GET /api/camera/{id}` - 获取摄像头详情
-- `POST /api/camera` - 创建摄像头
-- `PUT /api/camera/{id}` - 更新摄像头
-- `DELETE /api/camera/{id}` - 删除摄像头
-- `POST /api/camera/{id}/toggle` - 切换摄像头状态
-
-### 人脸识别
-- `GET /api/face/stats` - 获取统计信息
-- `GET /api/face/realtime` - 获取实时人脸数据
-- `GET /api/face/history` - 获取历史记录
-- `GET /api/face/export` - 导出数据
-
-### 告警管理
-- `GET /api/alerts` - 获取告警列表
-- `GET /api/alerts/{id}` - 获取告警详情
-- `POST /api/alerts/{id}/handle` - 处理告警
-- `POST /api/alerts/{id}/ignore` - 忽略告警
-- `POST /api/alerts/batch/handle` - 批量处理
-
-### 日志管理
-- `GET /api/logs` - 获取日志列表
-- `GET /api/logs/export` - 导出日志
-- `POST /api/logs/clear` - 清空日志
-
-### 系统配置
-- `GET /api/config` - 获取配置
-- `POST /api/config` - 更新配置
-
-### 报表统计
-- `GET /api/reports/summary` - 获取摘要
-- `GET /api/reports/emotion-distribution` - 情绪分布
-- `GET /api/reports/hourly` - 每小时统计
-- `GET /api/reports/trend` - 趋势数据
-
-### 系统状态
-- `GET /api/system/status` - 系统状态
-- `GET /api/system/health` - 健康检查
-
-### 模型管理
-- `GET /api/model/info` - 模型信息
-- `POST /api/model/test` - 测试模型
-- `POST /api/model/update` - 更新模型
-
-## WebSocket 接口
-
-- `ws://localhost:8000/ws/face` - 实时人脸数据
-- `ws://localhost:8000/ws/stats` - 实时统计数据
-- `ws://localhost:8000/ws/alerts` - 实时告警
-- `ws://localhost:8000/ws/video/{camera_id}` - 视频流
-
-## 默认账号
-
-- 用户名: `admin`
-- 密码: `admin123`
-
-## 后续开发
-
-### 接入真实的人脸检测模型
-
-修改 `app/services/face_detection.py`：
-
-```python
-def load_model(self, model_path: Optional[str] = None):
-    from mtcnn import MTCNN
-    self.model = MTCNN()
-    self.is_loaded = True
-
-def detect(self, frame: np.ndarray) -> List[FaceDetectionResult]:
-    # 使用真实模型进行检测
-    results = self.model.detect_faces(frame)
-    # ... 处理检测结果
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 接入真实的情绪识别模型
+服务地址：
 
-修改 `app/services/emotion_recognition.py`：
+- API 文档：`http://localhost:8000/docs`
+- 健康检查：`http://localhost:8000/health`
 
-```python
-def load_model(self, model_path: Optional[str] = None):
-    import torch
-    self.model = torch.load(model_path)
-    self.model.eval()
-    self.is_loaded = True
+## 6. 关键配置
 
-def recognize(self, face_image: np.ndarray) -> EmotionRecognitionResult:
-    # 使用真实模型进行识别
-    with torch.no_grad():
-        output = self.model(face_image)
-    # ... 处理识别结果
-```
+配置类在 `app/core/config.py`，同时支持读取后端根目录 `.env`。
 
-### 接入真实数据库
+重点配置项：
 
-修改 `app/services/data_store.py`，将 MockDataStore 替换为真实的数据库操作：
+- `DB_HOST / DB_PORT / DB_USER / DB_PASSWORD / DB_NAME`
+- `CORS_ORIGINS`（推荐 JSON 数组格式）
+- `ARK_API_KEY`
+- `ARK_BASE_URL`（当前要求不带 `chat/completions`）
+- `ARK_MODEL`
 
-```python
-# 使用 SQLAlchemy 或 Tortoise-ORM
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+## 7. 报表相关接口
 
-class DatabaseStore:
-    def __init__(self):
-        self.engine = create_engine("mysql://user:password@localhost/dbname")
-        # ...
-```
+前缀：`/api/reports`
 
-## 技术栈
+- `GET /summary`：摘要统计
+- `GET /emotion-distribution`：情绪占比
+- `GET /hourly`：时段识别频次
+- `GET /trend`：趋势统计
+- `GET /intelligent-analysis`：智能分析文本
 
-- **框架**: FastAPI
-- **服务器**: Uvicorn
-- **视频处理**: OpenCV
-- **认证**: JWT
-- **实时通信**: WebSocket
+统一查询参数：
 
-## 许可证
+- `reportType`：`daily | weekly | monthly | custom`
+- `startDate`：开始日期（日报/周报/月报/自定义均可）
+- `endDate`：结束日期（自定义常用）
+- `device`：设备 ID（可选）
 
-MIT License
+## 8. 智能分析（ARK）说明
+
+后端实现要点：
+
+- 仅在接口调用时触发（由前端导出按钮触发）
+- AI 请求放入 `asyncio.to_thread`，避免阻塞主事件循环
+- 支持候选模型回退策略
+- 会打印调试日志（POST URL、模型、脱敏 Key、脱敏 curl）
+
+排查建议：
+
+1. 先运行 `test_ark_api_connectivity.py` 验证 key、base_url、model
+2. 再调用 `/api/reports/intelligent-analysis`
+3. 对照后端日志确认实际生效配置
+
+## 9. 静态资源挂载
+
+由 `app/main.py` 挂载：
+
+- `/recordings` -> `data/storage/recordings`
+- `/alert_images` -> `data/storage/alert_images`
+
+## 10. 常见问题
+
+### 10.1 智能分析提示未启用
+
+- 检查 `ARK_API_KEY` 是否为空
+- 确认 `.env` 位于后端根目录且格式正确
+
+### 10.2 CORS 配置报错
+
+- `pydantic-settings` 建议使用 JSON 数组格式，例如：
+  `["http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173"]`
+
+### 10.3 前端能打开但接口失败
+
+- 确认前端代理与后端端口一致
+- 确认登录 token 有效
+- 检查数据库连接是否正常
+
+## 11. 说明
+
+仓库中保留了部分历史文档（如性能、数据库优化说明），用于记录阶段性优化，不影响本 README 的主流程。

@@ -120,7 +120,7 @@ def _check_port(ip: str, port: int = 554, timeout: float = 0.5) -> bool:
 
 @router.get("/scan/network", response_model=ResponseModel)
 async def scan_network(current_user: dict = Depends(get_current_admin_user)):
-    """扫描局域网中开放 RTSP 端口(554) 的设备"""
+    """扫描 192.168.9.0/24 中开放 RTSP 端口(554) 的设备"""
     # 获取本机 IP
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -131,8 +131,8 @@ async def scan_network(current_user: dict = Depends(get_current_admin_user)):
     finally:
         s.close()
 
-    parts = local_ip.split(".")
-    subnet = f"{parts[0]}.{parts[1]}.{parts[2]}."
+    # 按需求固定仅扫描 192.168.9.xxx 段
+    subnet = "192.168.9."
 
     found = []
     with ThreadPoolExecutor(max_workers=50) as executor:
@@ -145,7 +145,7 @@ async def scan_network(current_user: dict = Depends(get_current_admin_user)):
             if future.result() and ip != local_ip:
                 found.append(ip)
 
-    return ResponseModel(data={"local_ip": local_ip, "subnet": f"{subnet}0/24", "devices": found})
+    return ResponseModel(data={"local_ip": local_ip, "subnet": "192.168.9.0/24", "devices": found})
 
 
 class RtspTestRequest(BaseModel):

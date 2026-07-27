@@ -7,12 +7,13 @@ import base64
 import cv2
 import numpy as np
 import time
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 from fastapi import WebSocket, WebSocketDisconnect
 from datetime import datetime
 
 from app.services.inference_engine import inference_engine, InferenceFrame
 from app.services.data_store import data_store
+from app.services.performance_monitor import performance_monitor
 
 
 class WebSocketManager:
@@ -57,8 +58,13 @@ class WebSocketManager:
                 self.active_connections[channel].remove(websocket)
         print(f"WebSocket连接已断开: {channel}, 当前连接数: {len(self.active_connections[channel])}")
     
-    async def broadcast(self, message: dict, channel: str):
-        """广播消息到指定频道"""
+    async def broadcast(
+        self,
+        message: dict,
+        channel: str,
+        metric_camera_id: Optional[str] = None,
+    ):
+        """广播消息到指定频道。metric_camera_id 若有值，将本轮 send 耗时记入该摄像头的推送统计。"""
         if channel not in self.active_connections:
             return
         
@@ -67,12 +73,20 @@ class WebSocketManager:
         
         # 发送到该频道的所有连接
         disconnected = []
+        push_start = time.time()
+        success_count = 0
         for connection in self.active_connections[channel]:
             try:
                 await connection.send_text(message_json)
+                success_count += 1
             except Exception as e:
                 print(f"发送消息失败: {e}")
                 disconnected.append(connection)
+        if success_count > 0:
+            elapsed_ms = (time.time() - push_start) * 1000
+            performance_monitor.record_websocket_push(
+                elapsed_ms, metric_camera_id
+            )
         
         # 清理断开的连接
         for conn in disconnected:
@@ -131,7 +145,7 @@ class WebSocketManager:
                             "timestamp": datetime.now().isoformat(),
                             "data": data
                         }
-                        await self.broadcast(message, "face")
+                        await self.broadcast(message, "face", metric_camera_id=camera_id)
                 
                 # 发送统计数据（情绪分布用缓存，不阻塞）
                 if self.active_connections["stats"] and self.latest_stats:
@@ -153,7 +167,7 @@ class WebSocketManager:
                             "emotion_distribution": self._emotion_dist_cache
                         }
                     }
-                    await self.broadcast(stats_message, "stats")
+                    await self.broadcast(stats_message, "stats", metric_camera_id=None)
                 
                 # 发送视频流
                 if self.active_connections["video"] and self.video_frames:

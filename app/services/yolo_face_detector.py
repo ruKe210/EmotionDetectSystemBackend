@@ -114,7 +114,7 @@ class YOLOFaceDetector:
         # YOLOv8-face 输出格式: [batch, num_boxes, box_info]
         # box_info 包含: x1, y1, x2, y2, conf, class_probs...
         
-        print(f"[YOLO后处理] 输出形状: {outputs.shape}")
+        # 关闭高频 YOLO 后处理调试日志
         
         # 尝试不同的解析方式
         if len(outputs.shape) == 3 and outputs.shape[2] == 21:
@@ -140,27 +140,17 @@ class YOLOFaceDetector:
             boxes_xyxy[:, 2] = cx + w / 2  # x2
             boxes_xyxy[:, 3] = cy + h / 2  # y2
         else:
-            print(f"[YOLO后处理] 未知的输出格式: {outputs.shape}")
+            print(f"YOLO 输出格式异常: {outputs.shape}")
             return []
         
-        print(f"[YOLO后处理] 预测形状: {predictions.shape}")
-        
         # 过滤低置信度
-        max_score = np.max(scores)
-        print(f"[YOLO后处理] 最大置信度: {max_score:.3f}, 阈值: {self.conf_threshold}")
         
         mask = scores > self.conf_threshold
         filtered_boxes_xyxy = boxes_xyxy[mask]
         filtered_scores = scores[mask]
         
-        print(f"[YOLO后处理] 过滤后预测数: {len(filtered_boxes_xyxy)}")
-        
         if len(filtered_boxes_xyxy) == 0:
             return []
-        
-        # 调试：打印第一个框的坐标信息
-        print(f"[YOLO调试] 原图尺寸: {self.orig_w}x{self.orig_h}, 缩放比例: {self.ratio:.3f}, 偏移: ({self.x_offset}, {self.y_offset})")
-        print(f"[YOLO调试] 原始检测框 (640x640): x1={filtered_boxes_xyxy[0,0]:.1f}, y1={filtered_boxes_xyxy[0,1]:.1f}, x2={filtered_boxes_xyxy[0,2]:.1f}, y2={filtered_boxes_xyxy[0,3]:.1f}")
         
         # 转换为原图坐标
         # 减去填充偏移量，然后除以缩放比例
@@ -170,7 +160,6 @@ class YOLOFaceDetector:
         boxes_xyxy_orig[:, 2] = (filtered_boxes_xyxy[:, 2] - self.x_offset) / self.ratio  # x2
         boxes_xyxy_orig[:, 3] = (filtered_boxes_xyxy[:, 3] - self.y_offset) / self.ratio  # y2
         
-        print(f"[YOLO调试] 最终原图坐标: x1={boxes_xyxy_orig[0,0]:.1f}, y1={boxes_xyxy_orig[0,1]:.1f}, x2={boxes_xyxy_orig[0,2]:.1f}, y2={boxes_xyxy_orig[0,3]:.1f}")
         
         # NMS 非极大值抑制
         indices = cv2.dnn.NMSBoxes(
@@ -229,10 +218,6 @@ class YOLOFaceDetector:
             
             # 后处理
             faces = self.postprocess(outputs[0])
-            
-            # 调试：打印检测结果
-            if len(faces) > 0:
-                print(f"[YOLO] 检测到 {len(faces)} 个人脸")
             
             return faces
             

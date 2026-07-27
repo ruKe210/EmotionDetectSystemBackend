@@ -40,6 +40,15 @@ class DatabaseDataStore:
         self._batch_interval = 2.0  # 每2秒写入一次
         self._writer_thread = None
         self._writer_running = False
+        self._write_stats = {
+            "queued_records": 0,
+            "written_records": 0,
+            "failed_batches": 0,
+            "failed_records": 0,
+            "dropped_records": 0,
+            "last_write_ms": 0.0,
+            "last_error": "",
+        }
         
         # 存储节流：每秒只存一次
         self._last_save_time = 0
@@ -93,6 +102,7 @@ class DatabaseDataStore:
             return
         
         session = get_db_session()
+        write_start = time.time()
         try:
             face_records = []
             for face_data in batch:
@@ -118,11 +128,17 @@ class DatabaseDataStore:
             
             session.bulk_save_objects(face_records)
             session.commit()
+            self._write_stats["written_records"] += len(face_records)
+            self._write_stats["last_write_ms"] = round((time.time() - write_start) * 1000, 2)
+            self._write_stats["last_error"] = ""
         except Exception as e:
             try:
                 session.rollback()
             except Exception:
                 pass
+            self._write_stats["failed_batches"] += 1
+            self._write_stats["failed_records"] += len(batch)
+            self._write_stats["last_error"] = str(e)
             print(f"[数据存储] 批量写入失败({len(batch)}条): {e}")
         finally:
             try:
@@ -296,8 +312,21 @@ class DatabaseDataStore:
         """添加人脸检测记录到队列（非阻塞，队列满则丢弃）"""
         try:
             self._face_queue.put_nowait(detection_data)
+            self._write_stats["queued_records"] += 1
         except queue.Full:
+            self._write_stats["dropped_records"] += 1
             pass  # 静默丢弃，不打断推理循环
+
+    def get_write_stats(self) -> Dict:
+        """获取数据库写入统计，用于论文性能测试表。"""
+        return {
+            **self._write_stats,
+            "queue_size": self._face_queue.qsize(),
+            "queue_capacity": self._face_queue.maxsize,
+            "batch_size": self._batch_size,
+            "batch_interval": self._batch_interval,
+            "writer_running": self._writer_running,
+        }
 
     def get_face_history(self, start_date: Optional[datetime] = None,
                          end_date: Optional[datetime] = None,

@@ -18,7 +18,9 @@ from app.models.db_models import VideoRecord
 RECORD_DIR = os.path.join(settings.DATA_STORAGE_PATH, "recordings")
 os.makedirs(RECORD_DIR, exist_ok=True)
 
-SEGMENT_DURATION = 60  # 每段 60 秒
+def _segment_duration_seconds() -> int:
+    # 允许通过设置页动态修改分段时长，最小 10 秒
+    return max(10, int(getattr(settings, "VIDEO_RECORD_SEGMENT_SECONDS", 60)))
 
 
 class CameraRecorder:
@@ -33,6 +35,8 @@ class CameraRecorder:
         self.current_file: Optional[str] = None
         self.segment_start: Optional[float] = None
         self.frame_count = 0
+        self.first_frame_ts: Optional[float] = None
+        self.last_frame_ts: Optional[float] = None
         self.width = 0
         self.height = 0
         self.lock = threading.Lock()
@@ -43,13 +47,16 @@ class CameraRecorder:
             now = time.time()
 
             # 需要开新段
-            if self.writer is None or (now - self.segment_start >= SEGMENT_DURATION):
+            if self.writer is None or (now - self.segment_start >= _segment_duration_seconds()):
                 self._finish_segment()
                 self._start_segment(frame)
 
             if self.writer is not None:
                 self.writer.write(frame)
                 self.frame_count += 1
+                if self.first_frame_ts is None:
+                    self.first_frame_ts = now
+                self.last_frame_ts = now
 
     def _start_segment(self, frame):
         """开始新的录制段"""
@@ -87,6 +94,8 @@ class CameraRecorder:
         self.current_file = file_path
         self.segment_start = time.time()
         self.frame_count = 0
+        self.first_frame_ts = None
+        self.last_frame_ts = None
 
         # 写入数据库
         session = get_db_session()
@@ -113,6 +122,15 @@ class CameraRecorder:
     def _finish_segment(self):
         """结束当前录制段"""
         if self.writer is not None:
+            segment_real_duration = 0.0
+            if self.first_frame_ts is not None and self.last_frame_ts is not None:
+                segment_real_duration = max(0.0, self.last_frame_ts - self.first_frame_ts)
+            adaptive_fps = self.fps
+            if segment_real_duration > 0 and self.frame_count > 1:
+                # 用实际到帧频率估算下一段录制 FPS，避免回放倍速
+                estimated = self.frame_count / segment_real_duration
+                adaptive_fps = max(1, min(int(getattr(settings, "VIDEO_FPS", 10)), int(round(estimated))))
+
             self.writer.release()
             self.writer = None
 
@@ -127,6 +145,7 @@ class CameraRecorder:
                         record.end_time = datetime.now()
                         record.duration = int(time.time() - self.segment_start)
                         record.status = "completed"
+                        record.fps = self.fps
                         try:
                             record.file_size = os.path.getsize(self.current_file)
                         except Exception:
@@ -140,6 +159,10 @@ class CameraRecorder:
 
             self.current_record_id = None
             self.current_file = None
+            self.first_frame_ts = None
+            self.last_frame_ts = None
+            self.frame_count = 0
+            self.fps = adaptive_fps
 
     def stop(self):
         """停止录制"""
@@ -159,9 +182,12 @@ class VideoRecorderManager:
         return cls._instance
 
     def get_recorder(self, camera_id: str, camera_name: str = "") -> CameraRecorder:
+        fps = max(1, int(getattr(settings, "VIDEO_FPS", 10)))
         if camera_id not in self._recorders:
-            self._recorders[camera_id] = CameraRecorder(camera_id, camera_name, fps=10)
-        return self._recorders[camera_id]
+            self._recorders[camera_id] = CameraRecorder(camera_id, camera_name, fps=fps)
+        recorder = self._recorders[camera_id]
+        recorder.fps = fps
+        return recorder
 
     def write_frame(self, camera_id: str, frame, camera_name: str = ""):
         recorder = self.get_recorder(camera_id, camera_name)
